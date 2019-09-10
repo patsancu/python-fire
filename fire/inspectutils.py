@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import inspect
+import types
 from fire import docstrings
 
 import six
@@ -70,7 +71,7 @@ def _GetArgSpecInfo(fn):
   """
   skip_arg = False
   if inspect.isclass(fn):
-    # If the function is a class, we try to use it's init method.
+    # If the function is a class, we try to use its init method.
     skip_arg = True
     if six.PY2 and hasattr(fn, '__init__'):
       fn = fn.__init__
@@ -78,19 +79,35 @@ def _GetArgSpecInfo(fn):
     # If the function is a bound method, we skip the `self` argument.
     skip_arg = fn.__self__ is not None
   elif inspect.isbuiltin(fn):
-    # If the function is a bound builtin, we skip the `self` argument.
-    skip_arg = fn.__self__ is not None
+    # If the function is a bound builtin, we skip the `self` argument, unless
+    # the function is from a standard library module in which case its __self__
+    # attribute is that module.
+    if not isinstance(fn.__self__, types.ModuleType):
+      skip_arg = True
+  elif not inspect.isfunction(fn):
+    # The purpose of this else clause is to set skip_arg for callable objects.
+    skip_arg = True
   return fn, skip_arg
+
+
+def Py2GetArgSpec(fn):
+  """A wrapper around getargspec that tries both fn and fn.__call__."""
+  try:
+    return inspect.getargspec(fn)  # pylint: disable=deprecated-method
+  except TypeError:
+    if hasattr(fn, '__call__'):
+      return inspect.getargspec(fn.__call__)  # pylint: disable=deprecated-method
+    raise
 
 
 def GetFullArgSpec(fn):
   """Returns a FullArgSpec describing the given callable."""
-
+  original_fn = fn
   fn, skip_arg = _GetArgSpecInfo(fn)
 
   try:
     if six.PY2:
-      args, varargs, varkw, defaults = inspect.getargspec(fn)  # pylint: disable=deprecated-method
+      args, varargs, varkw, defaults = Py2GetArgSpec(fn)
       kwonlyargs = kwonlydefaults = None
       annotations = getattr(fn, '__annotations__', None)
     else:
@@ -100,10 +117,28 @@ def GetFullArgSpec(fn):
   except TypeError:
     # If we can't get the argspec, how do we know if the fn should take args?
     # 1. If it's a builtin, it can take args.
-    # 2. If it's an implicit __init__ function (a 'slot wrapper'), take no args.
-    # Are there other cases?
+    # 2. If it's an implicit __init__ function (a 'slot wrapper'), that comes
+    # from a namedtuple, use _fields to determine the args.
+    # 3. If it's another slot wrapper (that comes from not subclassing object in
+    # Python 2), then there are no args.
+    # Are there other cases? We just don't know.
+
+    # Case 1: Builtins accept args.
     if inspect.isbuiltin(fn):
+      # TODO(dbieber): Try parsing the docstring, if available.
+      # TODO(dbieber): Use known argspecs, like set.add and namedtuple.count.
       return FullArgSpec(varargs='vars', varkw='kwargs')
+
+    # Case 2: namedtuples store their args in their _fields attribute.
+    # TODO(dbieber): Determine if there's a way to detect false positives.
+    # In Python 2, a class that does not subclass anything, does not define
+    # __init__, and has an attribute named _fields will cause Fire to think it
+    # expects args for its constructor when in fact it does not.
+    fields = getattr(original_fn, '_fields', None)
+    if fields is not None:
+      return FullArgSpec(args=list(fields))
+
+    # Case 3: Other known slot wrappers do not accept args.
     return FullArgSpec()
 
   if skip_arg and args:

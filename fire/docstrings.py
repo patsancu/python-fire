@@ -56,6 +56,7 @@ from __future__ import print_function
 
 import collections
 import re
+import textwrap
 
 import enum
 
@@ -179,19 +180,17 @@ def parse(docstring):
     _consume_line(line_info, state)
 
   summary = ' '.join(state.summary.lines) if state.summary.lines else None
-  description = _join_lines(state.description.lines)
+  state.description.lines = _strip_blank_lines(state.description.lines)
+  description = textwrap.dedent('\n'.join(state.description.lines))
+  if not description:
+    description = None
   returns = _join_lines(state.returns.lines)
   yields = _join_lines(state.yields.lines)
   raises = _join_lines(state.raises.lines)
 
-  args = [
-      ArgInfo(
-          name=arg.name,
-          type=_cast_to_known_type(_join_lines(arg.type.lines)),
-          description=_join_lines(arg.description.lines),
-      )
-      for arg in state.args
-  ]
+  args = [ArgInfo(
+      name=arg.name, type=_cast_to_known_type(_join_lines(arg.type.lines)),
+      description=_join_lines(arg.description.lines)) for arg in state.args]
 
   return DocstringInfo(
       summary=summary,
@@ -201,6 +200,33 @@ def parse(docstring):
       raises=raises,
       yields=yields,
   )
+
+
+def _strip_blank_lines(lines):
+  """Removes lines containing only blank characters before and after the text.
+
+  Args:
+    lines: A list of lines.
+  Returns:
+    A list of lines without trailing or leading blank lines.
+  """
+  # Find the first non-blank line.
+  start = 0
+  num_lines = len(lines)
+  while lines and start < num_lines and _is_blank(lines[start]):
+    start += 1
+
+  lines = lines[start:]
+
+  # Remove trailing blank lines.
+  while lines and _is_blank(lines[-1]):
+    lines.pop()
+
+  return lines
+
+
+def _is_blank(line):
+  return not line or line.isspace()
 
 
 def _join_lines(lines):
@@ -391,7 +417,7 @@ def _consume_line(line_info, state):
     else:
       # We're past the end of the summary.
       # Additions now contribute to the description.
-      state.description.lines.append(line_info.remaining)
+      state.description.lines.append(line_info.remaining_raw)
   else:
     state.summary.permitted = False
 
@@ -424,7 +450,7 @@ def _consume_line(line_info, state):
     elif state.section.format == Formats.NUMPY:
       line_stripped = line_info.remaining.strip()
       if _is_arg_name(line_stripped):
-        # Token on it's own line can either be the last word of the description
+        # Token on its own line can either be the last word of the description
         # of the previous arg, or a new arg. TODO: Whitespace can distinguish.
         arg = _get_or_create_arg_by_name(state, line_stripped)
         state.current_arg = arg
@@ -470,12 +496,15 @@ def _create_line_info(line, next_line):
   line_info = Namespace()  # TODO(dbieber): Switch to an explicit class.
   line_info.line = line
   line_info.stripped = line.strip()
+  line_info.remaining_raw = line_info.line
   line_info.remaining = line_info.stripped
   line_info.indentation = len(line) - len(line.lstrip())
+  # TODO(dbieber): If next_line is blank, use the next non-blank line.
   line_info.next.line = next_line
-  line_info.next.stripped = next_line.strip() if next_line else None
+  next_line_exists = next_line is not None
+  line_info.next.stripped = next_line.strip() if next_line_exists else None
   line_info.next.indentation = (
-      len(next_line) - len(next_line.lstrip()) if next_line else None)
+      len(next_line) - len(next_line.lstrip()) if next_line_exists else None)
   # Note: This counts all whitespace equally.
   return line_info
 
@@ -497,6 +526,7 @@ def _update_section_state(line_info, state):
     state.section.format = Formats.GOOGLE
     state.section.title = google_section
     line_info.remaining = _get_after_google_header(line_info)
+    line_info.remaining_raw = line_info.remaining
     section_updated = True
 
   rst_section = _rst_section(line_info)
@@ -504,6 +534,7 @@ def _update_section_state(line_info, state):
     state.section.format = Formats.RST
     state.section.title = rst_section
     line_info.remaining = _get_after_directive(line_info)
+    line_info.remaining_raw = line_info.remaining
     section_updated = True
 
   numpy_section = _numpy_section(line_info)
@@ -511,6 +542,7 @@ def _update_section_state(line_info, state):
     state.section.format = Formats.NUMPY
     state.section.title = numpy_section
     line_info.remaining = ''
+    line_info.remaining_raw = line_info.remaining
     section_updated = True
 
   if section_updated:

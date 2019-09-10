@@ -31,6 +31,7 @@ from fire import trace
 class HelpTest(testutils.BaseTestCase):
 
   def setUp(self):
+    super(HelpTest, self).setUp()
     os.environ['ANSI_COLORS_DISABLED'] = '1'
 
   def testHelpTextNoDefaults(self):
@@ -76,9 +77,9 @@ class HelpTest(testutils.BaseTestCase):
         component=component,
         trace=trace.FireTrace(component, name='triple'))
     self.assertIn('NAME\n    triple', help_screen)
-    self.assertIn('SYNOPSIS\n    triple [--count=COUNT]', help_screen)
+    self.assertIn('SYNOPSIS\n    triple <flags>', help_screen)
     self.assertNotIn('DESCRIPTION', help_screen)
-    self.assertIn('FLAGS\n    --count', help_screen)
+    self.assertIn('FLAGS\n    --count=COUNT', help_screen)
     self.assertNotIn('NOTES', help_screen)
 
   def testHelpTextFunctionWithBuiltin(self):
@@ -110,9 +111,8 @@ class HelpTest(testutils.BaseTestCase):
         trace=trace.FireTrace(component, 'list'))
     self.assertIn('NAME\n    list', help_screen)
     self.assertIn('SYNOPSIS\n    list COMMAND', help_screen)
-    # We don't check description content here since the content could be python
-    # version dependent.
-    self.assertIn('DESCRIPTION\n', help_screen)
+    # The list docstring is messy, so it is not shown.
+    self.assertNotIn('DESCRIPTION', help_screen)
     # We don't check the listed commands either since the list API could
     # potentially change between Python versions.
     self.assertIn('COMMANDS\n    COMMAND is one of the following:\n',
@@ -125,9 +125,8 @@ class HelpTest(testutils.BaseTestCase):
         trace=trace.FireTrace(component, 'list'))
     self.assertIn('NAME\n    list', help_screen)
     self.assertIn('SYNOPSIS\n    list COMMAND', help_screen)
-    # We don't check description content here since the content could be python
-    # version dependent.
-    self.assertIn('DESCRIPTION\n', help_screen)
+    # The list docstring is messy, so it is not shown.
+    self.assertNotIn('DESCRIPTION', help_screen)
 
     # We don't check the listed commands comprehensively since the list API
     # could potentially change between Python versions. Check a few
@@ -142,7 +141,8 @@ class HelpTest(testutils.BaseTestCase):
         component=component, trace=trace.FireTrace(component, '7'))
     self.assertIn('NAME\n    7', help_screen)
     self.assertIn('SYNOPSIS\n    7 COMMAND | VALUE', help_screen)
-    self.assertIn('DESCRIPTION\n', help_screen)
+    # The int docstring is messy, so it is not shown.
+    self.assertNotIn('DESCRIPTION', help_screen)
     self.assertIn('COMMANDS\n    COMMAND is one of the following:\n',
                   help_screen)
     self.assertIn('VALUES\n    VALUE is one of the following:\n', help_screen)
@@ -215,14 +215,14 @@ VALUES
         double - Returns the input multiplied by 2.
 
     SYNOPSIS
-        double [--count=COUNT]
+        double <flags>
 
     DESCRIPTION
         Returns the input multiplied by 2.
 
     FLAGS
-        --count
-          Input number that you want to double."""
+        --count=COUNT
+            Input number that you want to double."""
     self.assertEqual(textwrap.dedent(expected_output).strip(),
                      help_output.strip())
 
@@ -232,7 +232,7 @@ VALUES
     help_screen = helptext.HelpText(component, t)
     self.assertIn(formatting.Bold('NAME') + '\n    triple', help_screen)
     self.assertIn(
-        formatting.Bold('SYNOPSIS') + '\n    triple [--count=COUNT]',
+        formatting.Bold('SYNOPSIS') + '\n    triple <flags>',
         help_screen)
     self.assertIn(
         formatting.Bold('FLAGS') + '\n    --' + formatting.Underline('count'),
@@ -265,6 +265,22 @@ VALUES
     self.assertIn('VALUE is one of the following:', help_screen)
     self.assertIn('alpha', help_screen)
 
+  def testHelpTextNameSectionCommandWithSeparator(self):
+    component = 9
+    t = trace.FireTrace(component, name='int', separator='-')
+    t.AddSeparator()
+    help_screen = helptext.HelpText(component=component, trace=t, verbose=False)
+    self.assertIn('int -', help_screen)
+    self.assertNotIn('int - -', help_screen)
+
+  def testHelpTextNameSectionCommandWithSeparatorVerbose(self):
+    component = tc.WithDefaults().double
+    t = trace.FireTrace(component, name='double', separator='-')
+    t.AddSeparator()
+    help_screen = helptext.HelpText(component=component, trace=t, verbose=True)
+    self.assertIn('double -', help_screen)
+    self.assertIn('double - -', help_screen)
+
 
 class UsageTest(testutils.BaseTestCase):
 
@@ -272,12 +288,12 @@ class UsageTest(testutils.BaseTestCase):
     component = tc.NoDefaults()
     t = trace.FireTrace(component, name='NoDefaults')
     usage_output = helptext.UsageText(component, trace=t, verbose=False)
-    expected_output = '''
+    expected_output = """
     Usage: NoDefaults <command>
       available commands:    double | triple
 
     For detailed information on this command, run:
-      NoDefaults --help'''
+      NoDefaults --help"""
 
     self.assertEqual(
         usage_output,
@@ -287,12 +303,12 @@ class UsageTest(testutils.BaseTestCase):
     component = tc.NoDefaults()
     t = trace.FireTrace(component, name='NoDefaults')
     usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    expected_output = """
     Usage: NoDefaults <command>
       available commands:    double | triple
 
     For detailed information on this command, run:
-      NoDefaults --help'''
+      NoDefaults --help"""
     self.assertEqual(
         usage_output,
         textwrap.dedent(expected_output).lstrip('\n'))
@@ -301,12 +317,12 @@ class UsageTest(testutils.BaseTestCase):
     component = tc.NoDefaults().double
     t = trace.FireTrace(component, name='NoDefaults')
     t.AddAccessedProperty(component, 'double', ['double'], None, None)
-    usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = """
     Usage: NoDefaults double COUNT
 
     For detailed information on this command, run:
-      NoDefaults double --help'''
+      NoDefaults double --help"""
     self.assertEqual(
         usage_output,
         textwrap.dedent(expected_output).lstrip('\n'))
@@ -314,14 +330,13 @@ class UsageTest(testutils.BaseTestCase):
   def testUsageOutputFunctionWithHelp(self):
     component = tc.function_with_help
     t = trace.FireTrace(component, name='function_with_help')
-    usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = """
     Usage: function_with_help <flags>
-
-    Available flags: --help
+      optional flags:        --help
 
     For detailed information on this command, run:
-      function_with_help -- --help'''
+      function_with_help -- --help"""
     self.assertEqual(
         usage_output,
         textwrap.dedent(expected_output).lstrip('\n'))
@@ -329,76 +344,93 @@ class UsageTest(testutils.BaseTestCase):
   def testUsageOutputFunctionWithDocstring(self):
     component = tc.multiplier_with_docstring
     t = trace.FireTrace(component, name='multiplier_with_docstring')
-    usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = """
     Usage: multiplier_with_docstring NUM <flags>
-
-    Available flags: --rate
+      optional flags:        --rate
 
     For detailed information on this command, run:
-      multiplier_with_docstring --help'''
+      multiplier_with_docstring --help"""
     self.assertEqual(
-        usage_output,
-        textwrap.dedent(expected_output).lstrip('\n'))
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
 
-  @testutils.skip('The functionality is not implemented yet')
   def testUsageOutputCallable(self):
-    # This is both a group and a command!
-    component = tc.CallableWithKeywordArgument
-    t = trace.FireTrace(component, name='CallableWithKeywordArgument')
-    usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    # TODO(joejoevictor): We need to handle the case for keyword args as well
-    # i.e. __call__ method of CallableWithKeywordArgument
-    expected_output = '''
-    Usage: CallableWithKeywordArgument <command>
-
-      Available commands:    print_msg
+    # This is both a group and a command.
+    component = tc.CallableWithKeywordArgument()
+    t = trace.FireTrace(component, name='CallableWithKeywordArgument',
+                        separator='@')
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = """
+    Usage: CallableWithKeywordArgument <command> | <flags>
+      available commands:    print_msg
+      flags are accepted
 
     For detailed information on this command, run:
-      CallableWithKeywordArgument -- --help'''
+      CallableWithKeywordArgument -- --help"""
     self.assertEqual(
-        usage_output,
-        textwrap.dedent(expected_output).lstrip('\n'))
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
 
   def testUsageOutputConstructorWithParameter(self):
     component = tc.InstanceVars
     t = trace.FireTrace(component, name='InstanceVars')
-    usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
-    Usage: InstanceVars ARG1 ARG2
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = """
+    Usage: InstanceVars --arg1=ARG1 --arg2=ARG2
 
     For detailed information on this command, run:
-      InstanceVars --help'''
+      InstanceVars --help"""
     self.assertEqual(
-        usage_output,
-        textwrap.dedent(expected_output).lstrip('\n'))
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
+
+  def testUsageOutputConstructorWithParameterVerbose(self):
+    component = tc.InstanceVars
+    t = trace.FireTrace(component, name='InstanceVars')
+    usage_output = helptext.UsageText(component, trace=t, verbose=True)
+    expected_output = """
+    Usage: InstanceVars <command> | --arg1=ARG1 --arg2=ARG2
+      available commands:    run
+
+    For detailed information on this command, run:
+      InstanceVars --help"""
+    self.assertEqual(
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
 
   def testUsageOutputEmptyDict(self):
     component = {}
     t = trace.FireTrace(component, name='EmptyDict')
     usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    expected_output = """
     Usage: EmptyDict
 
     For detailed information on this command, run:
-      EmptyDict --help'''
+      EmptyDict --help"""
     self.assertEqual(
-        usage_output,
-        textwrap.dedent(expected_output).lstrip('\n'))
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
 
   def testUsageOutputNone(self):
     component = None
     t = trace.FireTrace(component, name='None')
     usage_output = helptext.UsageText(component, trace=t, verbose=True)
-    expected_output = '''
+    expected_output = """
     Usage: None
 
     For detailed information on this command, run:
-      None --help'''
+      None --help"""
     self.assertEqual(
-        usage_output,
-        textwrap.dedent(expected_output).lstrip('\n'))
+        textwrap.dedent(expected_output).lstrip('\n'),
+        usage_output)
 
+  def testInitRequiresFlagSyntaxSubclassNamedTuple(self):
+    component = tc.SubPoint
+    t = trace.FireTrace(component, name='SubPoint')
+    usage_output = helptext.UsageText(component, trace=t, verbose=False)
+    expected_output = 'Usage: SubPoint --x=X --y=Y'
+    self.assertIn(expected_output, usage_output)
 
 if __name__ == '__main__':
   testutils.main()

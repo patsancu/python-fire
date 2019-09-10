@@ -290,6 +290,16 @@ class FireTest(testutils.BaseTestCase):
     self.assertEqual(
         fire.Fire(tc.TypedProperties, command=['delta', 'nest', '0']), 'a')
 
+  def testFireSet(self):
+    component = tc.simple_set()
+    result = fire.Fire(component, command=[])
+    self.assertEqual(len(result), 3)
+
+  def testFireFrozenset(self):
+    component = tc.simple_frozenset()
+    result = fire.Fire(component, command=[])
+    self.assertEqual(len(result), 3)
+
   def testFireList(self):
     component = ['zero', 'one', 'two', 'three']
     self.assertEqual(fire.Fire(component, command=['2']), 'two')
@@ -307,6 +317,16 @@ class FireTest(testutils.BaseTestCase):
                      'carry')
     self.assertEqual(fire.Fire(tc.TypedProperties, command=['fox', '1']),
                      'divide')
+
+  def testFireObjectWithListAsObject(self):
+    self.assertEqual(
+        fire.Fire(tc.TypedProperties, command=['echo', 'count', 'bethany']),
+        1)
+
+  def testFireObjectWithTupleAsObject(self):
+    self.assertEqual(
+        fire.Fire(tc.TypedProperties, command=['fox', 'count', 'divide']),
+        1)
 
   def testFireNoComponent(self):
     self.assertEqual(fire.Fire(command=['tc', 'WithDefaults', 'double', '10']),
